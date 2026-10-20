@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "BJJ Hybrid Performance",
+    "slug": "bjj-hybrid-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "scheme": "bjjhybrid",
+    "splash": {
+      "backgroundColor": "#09090b"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.bjjhybrid.mobile"
+    },
+    "android": {
+      "package": "com.bjjhybrid.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#09090b"
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}

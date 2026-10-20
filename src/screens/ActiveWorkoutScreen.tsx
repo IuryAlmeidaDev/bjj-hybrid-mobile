@@ -2,9 +2,9 @@
 import * as React from 'react';
 import { ScrollView, View, Text, Linking, TextInput, Pressable } from 'react-native';
 import { WorkoutPlan, ExerciseItem, AlternativeTier } from '../types/workout';
+import { submitSetLog } from '../services/api';
 import { Card } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
-import { Button } from '../components/ui/button';
 import { SwapSheetModal } from '../components/SwapSheetModal';
 import { FloatingRestTimer } from '../components/FloatingRestTimer';
 
@@ -17,6 +17,8 @@ export function ActiveWorkoutScreen({ workout, statusBanner }: ActiveWorkoutScre
   const [selectedTiers, setSelectedTiers] = React.useState<Record<string, 'A' | AlternativeTier>>({});
   const [swapTarget, setSwapTarget] = React.useState<ExerciseItem | null>(null);
   const [completedSets, setCompletedSets] = React.useState<Record<string, boolean>>({});
+  const [weightsInput, setWeightsInput] = React.useState<Record<string, string>>({});
+  const [repsInput, setRepsInput] = React.useState<Record<string, string>>({});
   const [restRemaining, setRestRemaining] = React.useState<number | null>(null);
 
   React.useEffect(() => {
@@ -27,11 +29,26 @@ export function ActiveWorkoutScreen({ workout, statusBanner }: ActiveWorkoutScre
     return () => clearInterval(timer);
   }, [restRemaining]);
 
-  const toggleSetComplete = (key: string, restSecs: number) => {
+  const toggleSetComplete = (
+    ex: ExerciseItem,
+    setNumber: number,
+    activeTier: 'A' | AlternativeTier
+  ) => {
+    const key = `${ex.id}_set_${setNumber}`;
     setCompletedSets((prev) => {
       const nextState = !prev[key];
       if (nextState) {
-        setRestRemaining(restSecs);
+        setRestRemaining(ex.rest_seconds);
+        submitSetLog({
+          workout_code: workout.code,
+          exercise_id: ex.id,
+          exercise_slug: ex.slug,
+          chosen_tier: activeTier,
+          set_number: setNumber,
+          weight_kg: parseFloat(weightsInput[key] || '0') || 0,
+          reps_done: parseInt(repsInput[key] || '8', 10) || 8,
+          rir: ex.recommended_rir || 1,
+        });
       }
       return { ...prev, [key]: nextState };
     });
@@ -100,7 +117,8 @@ export function ActiveWorkoutScreen({ workout, statusBanner }: ActiveWorkoutScre
               {/* Sets Table */}
               <View className="mt-3 space-y-2">
                 {Array.from({ length: setsCount }).map((_, idx) => {
-                  const setKey = `${ex.id}_set_${idx + 1}`;
+                  const setNumber = idx + 1;
+                  const setKey = `${ex.id}_set_${setNumber}`;
                   const isDone = !!completedSets[setKey];
                   return (
                     <View
@@ -112,22 +130,30 @@ export function ActiveWorkoutScreen({ workout, statusBanner }: ActiveWorkoutScre
                       }`}
                     >
                       <Text className="w-14 text-xs font-bold text-zinc-300">
-                        Série {idx + 1}
+                        Série {setNumber}
                       </Text>
                       <TextInput
+                        value={weightsInput[setKey] || ''}
+                        onChangeText={(val) =>
+                          setWeightsInput((prev) => ({ ...prev, [setKey]: val }))
+                        }
                         placeholder="Carga (kg)"
                         placeholderTextColor="#52525b"
                         keyboardType="numeric"
                         className="w-24 rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-center text-xs font-bold text-zinc-100"
                       />
                       <TextInput
+                        value={repsInput[setKey] || ''}
+                        onChangeText={(val) =>
+                          setRepsInput((prev) => ({ ...prev, [setKey]: val }))
+                        }
                         placeholder={ex.reps_range}
                         placeholderTextColor="#52525b"
                         keyboardType="numeric"
                         className="w-20 rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-center text-xs font-bold text-zinc-100"
                       />
                       <Pressable
-                        onPress={() => toggleSetComplete(setKey, ex.rest_seconds)}
+                        onPress={() => toggleSetComplete(ex, setNumber, activeTier)}
                         className={`h-8 w-8 items-center justify-center rounded-lg ${
                           isDone ? 'bg-emerald-500' : 'bg-zinc-800'
                         }`}

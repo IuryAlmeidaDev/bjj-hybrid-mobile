@@ -3,6 +3,11 @@ import * as React from 'react';
 import { ScrollView, View, Text, Pressable } from 'react-native';
 import { BjjCheckinPayload, WorkoutPlan } from '../types/workout';
 import { FALLBACK_WORKOUTS } from '../data/fallbackSeed';
+import {
+  fetchAllWorkoutsWithReadiness,
+  submitBjjCheckin,
+  resetReadinessState,
+} from '../services/api';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
@@ -17,13 +22,13 @@ interface WeeklyDayItem {
 }
 
 const WEEKLY_SCHEDULE: WeeklyDayItem[] = [
-  { day: 'SEG', type: 'BJJ', label: 'Jiu-Jitsu (19h–21h)' },
-  { day: 'TER', type: 'GYM', label: 'Treino A • Empurrar', workoutCode: 'A' },
-  { day: 'QUA', type: 'BJJ', label: 'Jiu-Jitsu (19h–21h)' },
-  { day: 'QUI', type: 'GYM', label: 'Treino B • Puxar', workoutCode: 'B' },
-  { day: 'SEX', type: 'BJJ', label: 'Jiu-Jitsu (19h–21h)' },
-  { day: 'SÁB', type: 'GYM', label: 'Treino C • Pernas', workoutCode: 'C' },
-  { day: 'DOM', type: 'REST', label: 'Descanso Total' },
+  { day: 'SEG', type: 'BJJ', label: 'Jiu-Jitsu (20h30–22h00)' },
+  { day: 'TER', type: 'GYM', label: 'Treino A • Empurrar & Ombros', workoutCode: 'A' },
+  { day: 'QUA', type: 'BJJ', label: 'Jiu-Jitsu (20h30–22h00)' },
+  { day: 'QUI', type: 'GYM', label: 'Treino B • Puxar & Pegada', workoutCode: 'B' },
+  { day: 'SEX', type: 'BJJ', label: 'Jiu-Jitsu (20h30–22h00)' },
+  { day: 'SÁB', type: 'GYM', label: 'Treino C • Pernas & Quadril', workoutCode: 'C' },
+  { day: 'DOM', type: 'REST', label: 'Descanso Total (Recuperação SNC)' },
 ];
 
 export function HomeScreen() {
@@ -31,55 +36,31 @@ export function HomeScreen() {
   const [activeWorkoutView, setActiveWorkoutView] = React.useState<boolean>(false);
   const [checkinVisible, setCheckinVisible] = React.useState<boolean>(false);
   const [workouts, setWorkouts] = React.useState<Record<'A' | 'B' | 'C', WorkoutPlan>>(FALLBACK_WORKOUTS);
+  const [isApiOnline, setIsApiOnline] = React.useState<boolean>(false);
   const [statusBanner, setStatusBanner] = React.useState<string>(
     'Prontidão 100% — Volume padrão liberado (RIR 1–2)'
   );
 
-  const handleBjjCheckinSubmit = (payload: BjjCheckinPayload) => {
-    const internalLoad = payload.rounds_count * payload.round_duration_min * payload.rpe_intensity;
-    const isHeavy = payload.rpe_intensity >= 8 || internalLoad >= 200;
-    const hasStress = payload.body_stress_tags.length > 0;
+  React.useEffect(() => {
+    fetchAllWorkoutsWithReadiness().then((sync) => {
+      setIsApiOnline(sync.online);
+      setWorkouts(sync.workouts);
+      setStatusBanner(sync.readiness_summary);
+    });
+  }, []);
 
-    if (isHeavy || hasStress) {
-      const updated = { ...workouts };
-      (['A', 'B', 'C'] as const).forEach((code) => {
-        updated[code] = {
-          ...updated[code],
-          exercises: updated[code].exercises.map((ex) => {
-            const nextSets = isHeavy ? Math.max(2, ex.default_sets - 1) : ex.default_sets;
-            let autoTier = ex.auto_swapped_to_tier;
-            let autoReason = ex.auto_swap_reason;
+  const handleBjjCheckinSubmit = async (payload: BjjCheckinPayload) => {
+    const sync = await submitBjjCheckin(payload);
+    setIsApiOnline(sync.online);
+    setWorkouts(sync.workouts);
+    setStatusBanner(sync.readiness_summary);
+  };
 
-            if (payload.body_stress_tags.includes('lombar') && ex.slug === 'rdl_terra_romeno') {
-              autoTier = 'B';
-              autoReason = 'Auto-ajuste por fadiga lombar no Jiu-Jitsu';
-            } else if (payload.body_stress_tags.includes('ombro') && ex.slug === 'supino_reto') {
-              autoTier = 'B';
-              autoReason = 'Auto-ajuste para proteger articulação do ombro';
-            } else if (payload.body_stress_tags.includes('pegada') && ex.slug === 'barra_fixa') {
-              autoTier = 'B';
-              autoReason = 'Auto-ajuste por fadiga de pegada de quimono';
-            }
-
-            return {
-              ...ex,
-              adjusted_sets: nextSets,
-              recommended_rir: isHeavy ? 2 : 1,
-              auto_swapped_to_tier: autoTier,
-              auto_swap_reason: autoReason,
-            };
-          }),
-        };
-      });
-      setWorkouts(updated);
-      setStatusBanner(
-        `Check-in registrado (${payload.rounds_count} rolas • RPE ${payload.rpe_intensity}): Volume ajustado para recuperação articular`
-      );
-    } else {
-      setStatusBanner(
-        `Check-in registrado (${payload.rounds_count} rolas • RPE ${payload.rpe_intensity}): Prontidão alta mantida`
-      );
-    }
+  const handleResetReadiness = async () => {
+    const sync = await resetReadinessState();
+    setIsApiOnline(sync.online);
+    setWorkouts(sync.workouts);
+    setStatusBanner(sync.readiness_summary);
   };
 
   if (activeWorkoutView) {
@@ -92,7 +73,13 @@ export function HomeScreen() {
           >
             <Text className="text-xs font-bold text-zinc-300">← Voltar ao Painel</Text>
           </Pressable>
-          <Badge label={`TREINO ${selectedCode}`} tone="blue" />
+          <View className="flex-row items-center gap-2">
+            <Badge
+              label={isApiOnline ? 'API NODE ONLINE' : 'MODO OFFLINE'}
+              tone={isApiOnline ? 'emerald' : 'amber'}
+            />
+            <Badge label={`TREINO ${selectedCode}`} tone="blue" />
+          </View>
         </View>
         <ActiveWorkoutScreen workout={workouts[selectedCode]} statusBanner={statusBanner} />
       </View>
@@ -102,12 +89,18 @@ export function HomeScreen() {
   return (
     <View className="flex-1 bg-zinc-950">
       <ScrollView className="flex-1 px-4 pt-6 pb-16">
-        <Badge label="PERIODIZAÇÃO HÍBRIDA • JIU-JITSU + FORÇA" tone="blue" className="self-start" />
+        <View className="flex-row items-center justify-between">
+          <Badge label="PERIODIZAÇÃO HÍBRIDA • JIU-JITSU + FORÇA" tone="blue" />
+          <Badge
+            label={isApiOnline ? '🟢 API NODE ONLINE' : '⚡ SEED OFFLINE'}
+            tone={isApiOnline ? 'emerald' : 'amber'}
+          />
+        </View>
         <Text className="mt-2 text-2xl font-extrabold text-zinc-50">
           BJJ & Strength Hybrid
         </Text>
         <Text className="mt-1 text-xs text-zinc-400">
-          3x Jiu-Jitsu (Seg/Qua/Sex) + 3x Musculação Full-Body/Split (Ter/Qui/Sáb)
+          3x Jiu-Jitsu (Seg/Qua/Sex • 20h30–22h00) + 3x Musculação (Ter/Qui/Sáb)
         </Text>
 
         {/* Readiness Banner */}
@@ -115,7 +108,11 @@ export function HomeScreen() {
           <CardHeader>
             <View className="flex-row items-center justify-between">
               <Badge label="STATUS DE PRONTIDÃO" tone="emerald" />
-              <Text className="text-xs font-bold text-emerald-400">Motor Autoreg Ativo</Text>
+              <Pressable onPress={handleResetReadiness}>
+                <Text className="text-xs font-bold text-emerald-400 underline">
+                  Resetar 100%
+                </Text>
+              </Pressable>
             </View>
             <CardTitle className="mt-2 text-base">Adaptação Dinâmica Pós-Tatame</CardTitle>
             <CardDescription className="text-zinc-300">{statusBanner}</CardDescription>
